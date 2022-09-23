@@ -1,10 +1,29 @@
 from enum import Enum
+# import enum
+import platform
 import re
+import time
 import requests
 import json
 
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+
+def get_timestamped_file_name(*args, delimeter="-", include_dot_txt = True):
+    returnString = time.strftime("[%Y:%m:%d-%H:%M:%S]")
+
+    if len(args) == 0:
+        raise Exception("AT LEAST ONE ARGUMENT IS REQUIRED")
+    elif len(args) == 1:
+        return returnString + args[0]
+    else:
+        for i in range(0, len(args) - 1):
+            returnString += args[i] + delimeter
+        returnString += args[len(args) - 1]
+        if include_dot_txt:
+            returnString += ".txt"
+        return returnString
 
 
 def extract_ip_from_string(unformattedString: str):
@@ -24,6 +43,33 @@ def extract_ip_from_string(unformattedString: str):
         return None
 
 
+class EnvironmentInfo():
+
+    class OS(Enum):
+        LINUX = "Linux"
+        WINDOWS = "Windows"
+
+    @staticmethod
+    def get_system_platform():
+        temp = platform.system()
+        if platform.system() == "Linux":
+            return EnvironmentInfo.OS.LINUX
+        else:
+            return EnvironmentInfo.OS.WINDOWS
+
+    @staticmethod
+    def get_system_platform_full_name():
+        temp = platform.system()
+        if temp == "Linux":
+            return platform.linux_distribution()
+        else:
+            return platform.platform()
+
+    @staticmethod
+    def get_python_version():
+        return platform.python_version()
+
+
 def merge_two_dicts(x, y):
     z = x.copy()   # start with keys and values of x
     z.update(y)    # modifies z with keys and values of y
@@ -32,12 +78,12 @@ def merge_two_dicts(x, y):
 
 class iLOSession():
 
-    class Generation(Enum):
+    class GENERATION(Enum):
         GEN9 = "9"
         GEN10 = "10"
         GEN10P = "10p"
 
-    class iLOVersion(Enum):
+    class ILO_VERSION(Enum):
         ILO_4 = "ilo_4"
         ILO_3 = "ilo_3"
         ILO_5 = "ilo_5"
@@ -118,17 +164,17 @@ class iLOSession():
     def get_ilo_version(self):
         response = self.request_session.get(
             self.API_url + 'Managers/1/').json()
-        if self.generation == iLOSession.Generation.GEN9:
+        if self.generation == iLOSession.GENERATION.GEN9:
             full_version_string = response["Firmware"]["Current"]["VersionString"]
         else:
             full_version_string = response["FirmwareVersion"]
         temp = full_version_string.split(" ")
         if temp[1] == "4":
-            ilo_version = iLOSession.iLOVersion.ILO_4
+            ilo_version = iLOSession.ILO_VERSION.ILO_4
         elif temp[1] == "5":
-            ilo_version = iLOSession.iLOVersion.ILO_5
+            ilo_version = iLOSession.ILO_VERSION.ILO_5
         elif temp[1] == "3":
-            ilo_version = iLOSession.iLOVersion.ILO_3
+            ilo_version = iLOSession.ILO_VERSION.ILO_3
         ilo_firmware_version = temp[2]
 
         # root = ET.fromstring(x.content)
@@ -141,7 +187,7 @@ class iLOSession():
             Dict: Dictionary of all the BIOS settings on the server
         """
 
-        if self.generation is self.Generation.GEN9:
+        if self.generation is self.GENERATION.GEN9:
             response = self.request_session.get(
                 self.API_url + "systems/1/bios/settings/")
             currentSettings = response.json()
@@ -154,7 +200,7 @@ class iLOSession():
                 self.API_url + "systems/1/bios/settings/")
             currentSettings = response.json()["Attributes"]
 
-            if self.generation is self.Generation.GEN10:
+            if self.generation is self.GENERATION.GEN10:
                 response = self.request_session.get(
                     self.API_url + "systems/1/bios/service/settings/")
                 currentSettings = merge_two_dicts(
@@ -175,16 +221,16 @@ class iLOSession():
         product = productJSON["Model"].lower()
 
         if "gen10 plus" in product:
-            return (model, self.Generation.GEN10P)
+            return (model, self.GENERATION.GEN10P)
         elif "gen10" in product:
-            return (model, self.Generation.GEN10)
+            return (model, self.GENERATION.GEN10)
         elif "gen9" in product:
-            return (model, self.Generation.GEN9)
+            return (model, self.GENERATION.GEN9)
         else:
             return None
 
     def get_power_metric(self):
-        if self.ilo_version in [iLOSession.iLOVersion.ILO_4, iLOSession.iLOVersion.ILO_5]:
+        if self.ilo_version in [iLOSession.ILO_VERSION.ILO_4, iLOSession.ILO_VERSION.ILO_5]:
             response = self.request_session.get(
                 self.API_url + 'chassis/1/power')
             responseJson = response.json()
