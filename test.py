@@ -1,7 +1,6 @@
 import unittest
-
-from requests import session
-from ilo_scripting_helper import iLOSession, extract_ip_from_string
+# from ilo_scripting_helper2 import iLOSession, extract_ip_from_string
+import ilo_scripting_helper
 
 cases = [
     {'ip': "http://10.188.1.191/",
@@ -10,10 +9,10 @@ cases = [
      'clean_ip': "10.188.1.191",
      "url_https": "https://10.188.1.191/",
      "url_API_https": "https://10.188.1.191/redfish/v1/",
-     "gen": iLOSession.Generation.GEN9,
+     "gen": ilo_scripting_helper.iLOSession.Generation.GEN9,
      "model": "ProLiant DL360 Gen9",
      "full_ilo_version": "iLO 4 v2.78",
-     "ilo_version": iLOSession.iLOVersion.ILO_4,
+     "ilo_version": ilo_scripting_helper.iLOSession.iLOVersion.ILO_4,
      "ilo_firmware_version": "v2.78"
      },
     {'ip': "http://10.188.1.183/",
@@ -22,10 +21,10 @@ cases = [
      'clean_ip': "10.188.1.183",
      "url_https": "https://10.188.1.183/",
      "url_API_https": "https://10.188.1.183/redfish/v1/",
-     "gen": iLOSession.Generation.GEN10,
+     "gen": ilo_scripting_helper.iLOSession.Generation.GEN10,
      "model": "ProLiant DL360 Gen10",
      "full_ilo_version": "iLO 5 v2.65",
-     "ilo_version": iLOSession.iLOVersion.ILO_5,
+     "ilo_version": ilo_scripting_helper.iLOSession.iLOVersion.ILO_5,
      "ilo_firmware_version": "v2.65"
      },
     {'ip': "http://10.188.2.33/",
@@ -34,10 +33,10 @@ cases = [
      'clean_ip': "10.188.2.33",
      "url_https": "https://10.188.2.33/",
      "url_API_https": "https://10.188.2.33/redfish/v1/",
-     "gen": iLOSession.Generation.GEN10P,
+     "gen": ilo_scripting_helper.iLOSession.Generation.GEN10P,
      "model": "ProLiant DL360 Gen10 Plus",
      "full_ilo_version": "iLO 5 v2.70",
-     "ilo_version": iLOSession.iLOVersion.ILO_5,
+     "ilo_version": ilo_scripting_helper.iLOSession.iLOVersion.ILO_5,
      "ilo_firmware_version": "v2.70"
      }
 ]
@@ -98,14 +97,14 @@ class TestIloScriptingTools(unittest.TestCase):
     def test_ilo_session_power_metric(self):
         for case in cases:
             with self.subTest(case['ip']):
-                session = iLOSession(
+                session = ilo_scripting_helper.iLOSession(
                     case['ip'], case['user'], case['password'])
                 self.assertTrue(isinstance(session.get_power_metric(), int))
 
     def test_ilo_session_class_attributes(self):
         for case in cases:
             with self.subTest(case['ip']):
-                session = iLOSession(
+                session = ilo_scripting_helper.iLOSession(
                     case['ip'], case['user'], case['password'])
                 self.assertFalse(
                     session.ip != case["clean_ip"], session.ip + " != " + case["clean_ip"])
