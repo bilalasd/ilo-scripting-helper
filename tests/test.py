@@ -1,3 +1,5 @@
+from cmath import e
+import os
 import unittest
 # from ilo_scripting_helper2 import iLOSession, extract_ip_from_string
 import ilo_scripting_helper
@@ -43,11 +45,36 @@ cases = [
 
 
 class TestIloScriptingTools(unittest.TestCase):
+    def test_read_values_from_file(self):
+        with self.subTest("file with values"):
+            values = ilo_scripting_helper.read_in_values_from_file(
+                os.path.join(os.path.dirname(__file__), "test_file.txt"))
+            test = [
+                ['a1', 'a2'],
+                ['b1', 'b2'],
+                ['c1', 'c2'],
+                ['d1', 'd2'],
+                ['e1', 'e2'],
+                ['f1', 'f2', 'f3'],
+                ['g1', 'g2', 'g3', 'g4'],
+            ]
+            self.assertTrue(values == test)
+        with self.subTest("file doesn't exist"):
+            try:
+                values = ilo_scripting_helper.read_in_values_from_file(os.path.join(os.path.dirname(__file__), "asd.txt"))
+                self.fail()
+            except Exception as e:
+                self.assertTrue(True)
+
+            # self.assertRaises(Exception("NO VALUES IN FILE `empty_test_file.txt'."), ilo_scripting_helper.read_in_values_from_file(
+            #     os.path.join(os.path.dirname(__file__), "empty_test_file.txt")))
+
     def test_extract_ip_from_string(self):
 
         for case in cases:
             with self.subTest(case['ip']):
-                result = extract_ip_from_string(case['ip'])
+                result = ilo_scripting_helper.extract_ip_from_string(
+                    case['ip'])
                 self.assertEqual(result, case['clean_ip'])
 
     def test_ilo_session_power_metric(self):
@@ -77,21 +104,30 @@ class TestIloScriptingTools(unittest.TestCase):
                 self.assertFalse(
                     session.ilo_firmware_version != case["ilo_firmware_version"], session.ilo_firmware_version + " != " + case["ilo_firmware_version"])
 
-    def test_environment_info(self):
+    def test_environment_info_windows(self):
         self.assertFalse("Windows-10-10.0.18363-SP0" != ilo_scripting_helper.EnvironmentInfo.get_system_platform_full_name(),
                          "Windows-10-10.0.18363-SP0" + "!=" + ilo_scripting_helper.EnvironmentInfo.get_system_platform_full_name())
         self.assertFalse(ilo_scripting_helper.EnvironmentInfo.OS.WINDOWS != ilo_scripting_helper.EnvironmentInfo.get_system_platform(
         ), ilo_scripting_helper.EnvironmentInfo.OS.WINDOWS.name + " != " + ilo_scripting_helper.EnvironmentInfo.get_system_platform().name)
 
+    def test_environment_info_mac(self):
+        self.assertFalse("macOS-12.5-arm64-arm-64bit" != ilo_scripting_helper.EnvironmentInfo.get_system_platform_full_name(),
+                         "macOS-12.5-arm64-arm-64bit" + "!=" + ilo_scripting_helper.EnvironmentInfo.get_system_platform_full_name())
+        self.assertFalse(ilo_scripting_helper.EnvironmentInfo.OS.DARWIN != ilo_scripting_helper.EnvironmentInfo.get_system_platform(
+        ), ilo_scripting_helper.EnvironmentInfo.OS.DARWIN.name + " != " + ilo_scripting_helper.EnvironmentInfo.get_system_platform().name)
+
     def test_timestamped_filename(self):
         with self.subTest("default"):
-            temp = ilo_scripting_helper.get_timestamped_file_name("first","second","third")
+            temp = ilo_scripting_helper.get_timestamped_file_name(
+                "first", "second", "third")
             self.assertTrue(temp.endswith("first-second-third.txt"))
 
         with self.subTest("delimer ,"):
-            temp = ilo_scripting_helper.get_timestamped_file_name("first","second","third",delimeter=",")
+            temp = ilo_scripting_helper.get_timestamped_file_name(
+                "first", "second", "third", delimeter=",")
             self.assertTrue(temp.endswith("first,second,third.txt"))
-        
+
         with self.subTest("delimer ,"):
-            temp = ilo_scripting_helper.get_timestamped_file_name("first","second","third",delimeter=",",include_dot_txt=False)
+            temp = ilo_scripting_helper.get_timestamped_file_name(
+                "first", "second", "third", delimeter=",", include_dot_txt=False)
             self.assertTrue(temp.endswith("first,second,third"))

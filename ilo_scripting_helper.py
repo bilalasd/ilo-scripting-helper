@@ -1,5 +1,5 @@
 from enum import Enum
-# import enum
+import os
 import platform
 import re
 import time
@@ -10,7 +10,7 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-def get_timestamped_file_name(*args, delimeter="-", include_dot_txt = True):
+def get_timestamped_file_name(*args, delimeter="-", include_dot_txt=True):
     returnString = time.strftime("[%Y:%m:%d-%H:%M:%S]")
 
     if len(args) == 0:
@@ -24,6 +24,25 @@ def get_timestamped_file_name(*args, delimeter="-", include_dot_txt = True):
         if include_dot_txt:
             returnString += ".txt"
         return returnString
+
+
+def read_in_values_from_file(file_name):
+    if not os.path.exists(file_name):
+        raise Exception(file_name + " DOESN'T EXISTS")
+    values = []
+    with open(file_name, "r") as fp:
+
+        data = fp.read()
+        rows = data.split("\n")
+
+        for row in rows:
+            if row.strip().replace(" ", "").replace("\t", "") == "":
+                continue
+            split = " ".join(row.split()).replace(
+                " ", "\t").strip().split("\t")
+
+            values.append(split)
+    return values
 
 
 def extract_ip_from_string(unformattedString: str):
@@ -48,12 +67,15 @@ class EnvironmentInfo():
     class OS(Enum):
         LINUX = "Linux"
         WINDOWS = "Windows"
+        DARWIN = "Darwin"
 
     @staticmethod
     def get_system_platform():
         temp = platform.system()
-        if platform.system() == "Linux":
+        if temp == "Linux":
             return EnvironmentInfo.OS.LINUX
+        elif temp == "Darwin":
+            return EnvironmentInfo.OS.DARWIN
         else:
             return EnvironmentInfo.OS.WINDOWS
 
@@ -88,6 +110,22 @@ class iLOSession():
         ILO_3 = "ilo_3"
         ILO_5 = "ilo_5"
 
+    class ILO4_RESET_OPTIONS(Enum):
+        ON = "On"
+        FORCE_OFF = "ForceOff"
+        GRACEFUL_SHUTDOWN = "GracefulShutdown"
+        FORCE_RESTART = "ForceRestart"
+        NMI = "Nmi"
+        PUSH_POWER_BUTTON = "PushPowerButton"
+        GRACEFUL_RESTART = "GracefulRestart"
+
+    class ILO4_RESET_OPTIONS(Enum):
+        ON = "On"
+        FORCE_OFF = "ForceOff"
+        FORCE_RESTART = "ForceRestart"
+        NMI = "Nmi"
+        PUSH_POWER_BUTTON = "PushPowerButton"
+
     def __init__(self, url, username, password, useHTTPS=True):
         """Provides many of the commonly used functions when scripting for iLO. Automatically gets many of the information that is used commonly such as BIOS settings, server generation etc.
 
@@ -111,12 +149,14 @@ class iLOSession():
         self.API_url = self._url_API_https if useHTTPS else self._url_API_http
 
         self.request_session = self.create_session()
-        (self.model, self.generation) = self.get_server_generation()
-        # self.model = self.get_server_model()
-        self.BIOS_settings = self.get_BIOS_settings()
+        (self.model, self.generation) = self._get_server_generation()
+
+        (self._bios_settings_pending, self._bios_service_settings_pending,
+         self.bios_settings_pending, self._bios_settings_final, self._bios_service_settings_final,
+         self.bios_settings_final) = self._get_bios_settings()
 
         (self.full_ilo_version_string, self.ilo_version,
-         self.ilo_firmware_version) = self.get_ilo_version()
+         self.ilo_firmware_version) = self._get_ilo_version()
 
     def __del__(self):
         self.request_session.close()
@@ -161,7 +201,25 @@ class iLOSession():
         session.headers.update({"X-Auth-Token": token})
         return session
 
-    def get_ilo_version(self):
+    def reset_server(self, reset_option):
+        if self.ilo_version == iLOSession.ILO_VERSION.ILO_3:
+            raise Exception("iLO 3 NOT SUPPORTED")
+
+        if self.ilo_version == iLOSession.ILO_VERSION.ILO_4:
+            pass
+            self.request_session.post(
+                self.API_url + "Systems/1/", {"Action": "Reset", "ResetType": reset_option.name})
+
+        else:
+            pass
+            self.request_session.post(
+                self.API_url + "Systems/1/Actions/ComputerSystem.Reset/", {"ResetType": reset_option.name})
+
+    def update_ilo_version(self):
+        (self.full_ilo_version_string, self.ilo_version,
+         self.ilo_firmware_version) = self._get_ilo_version()
+
+    def _get_ilo_version(self):
         response = self.request_session.get(
             self.API_url + 'Managers/1/').json()
         if self.generation == iLOSession.GENERATION.GEN9:
@@ -180,34 +238,61 @@ class iLOSession():
         # root = ET.fromstring(x.content)
         return (full_version_string, ilo_version, ilo_firmware_version)
 
-    def get_BIOS_settings(self):
+    def update_bios_settings(self):
+        (self._bios_settings_pending, self._bios_service_settings_pending,
+         self.bios_settings_pending, self._bios_settings_final, self._bios_service_settings_final,
+         self.bios_settings_final) = self._get_bios_settings()
+
+    def _get_bios_settings(self):
         """Retrieves the BIOS setting for the server. Gets called automatically when the iLOSession object is created. Rarely needs to be run directly.
 
         Returns:
             Dict: Dictionary of all the BIOS settings on the server
         """
+        # bios_settings = {}
+        # bios_settings_pending = {}
+        # bios_service_settings = {}
+        # bios_service_settings_pending = {}
+        # combined_settings = {}
 
-        if self.generation is self.GENERATION.GEN9:
-            response = self.request_session.get(
-                self.API_url + "systems/1/bios/settings/")
-            currentSettings = response.json()
+        # final settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/").json()
+        bios_settings_final = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
 
-            response = self.request_session.get(
-                self.API_url + "systems/1/bios/service/settings/")
-            currentSettings = merge_two_dicts(currentSettings, response.json())
-        else:
-            response = self.request_session.get(
-                self.API_url + "systems/1/bios/settings/")
-            currentSettings = response.json()["Attributes"]
+        # final service settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/service/").json()
+        bios_service_settings_final = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
 
-            if self.generation is self.GENERATION.GEN10:
-                response = self.request_session.get(
-                    self.API_url + "systems/1/bios/service/settings/")
-                currentSettings = merge_two_dicts(
-                    currentSettings, response.json()["Attributes"])
-        return currentSettings
+        # combine the two final settings
+        combined_settings_final = merge_two_dicts(
+            bios_settings_final, bios_service_settings_final)
 
-    def get_server_generation(self):
+        # pending settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/settings/").json()
+        bios_settings_pending = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
+
+        # pending service settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/service/settings/").json()
+        bios_service_settings_pending = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
+
+        # combine the two pending settings
+        combined_settings_pending = merge_two_dicts(
+            bios_settings_pending, bios_service_settings_pending)
+
+        return (bios_settings_pending, bios_service_settings_pending, combined_settings_pending, bios_settings_final, bios_service_settings_final, combined_settings_final)
+
+    def update_server_generation(self):
+        (self.model, self.generation) = self.get_server_generation()
+
+    def _get_server_generation(self):
         """Retrieves the generation of the server
 
         Returns:
@@ -229,6 +314,33 @@ class iLOSession():
         else:
             return None
 
+    def compare_bios_settings(self, values):
+        if len(values) == 0:
+            raise Exception("PROVIDED DICT IS EMPTY")
+
+        return_obj = {}
+
+        for key in values:
+            val = values[key]
+
+            if key not in self.bios_settings_pending and key not in self._bios_service_settings_pending:
+                raise Exception(
+                    "'" + val + "' NOT FOUND IN CURRENT BIOS SETTINGS")
+
+            if key in self.bios_settings_pending:
+                if val != self.bios_settings_pending[key]:
+                    return_obj[key] = {
+                        "setting_current_value": self.bios_settings_pending[key],
+                        "setting_new_value": val
+                    }
+                else:
+                    return_obj[key] = {
+
+                        "setting_current_value": self._bios_service_settings_pending[key],
+                        "setting_new_value": val
+                    }
+        return return_obj
+
     def get_power_metric(self):
         if self.ilo_version in [iLOSession.ILO_VERSION.ILO_4, iLOSession.ILO_VERSION.ILO_5]:
             response = self.request_session.get(
@@ -240,7 +352,60 @@ class iLOSession():
             raise Exception(
                 "METHOD DOES NOT WORK ON THIS VERSION ILO. ILO VERSION: " + self.ilo_version.name)
 
+    def change_bios_settings(self, values):
+        if len(values) == 0:
+            raise Exception("PROVIDED DICT IS EMPTY")
+
+        new_bios_body = {
+            "@odata.id": "/redfish/v1/systems/1/bios/settings/",
+        }
+
+        new_bios_service_body = {
+            "@odata.id": "/redfish/v1/systems/1/bios/service/settings/"
+        }
+
+        if self.generation == iLOSession.GENERATION.GEN9:
+            new_bios_body["Attributes"] = {}
+            new_bios_service_body["Attributes"] = {}
+        bios_settings_changed = False
+        bios_service_settings_changed = False
+
+        for key in values:
+            val = values[key]
+
+            if key not in self.bios_settings_pending and key not in self._bios_service_settings_pending:
+                raise Exception(
+                    "'" + val + "' NOT FOUND IN CURRENT BIOS SETTINGS")
+
+            if self.generation == iLOSession.GENERATION.GEN9:
+                if key in self.bios_settings_pending:
+                    new_bios_body[key] = val
+                    bios_settings_changed = True
+                else:
+                    new_bios_service_body[key] = val
+                    bios_service_settings_changed = True
+            else:
+                if key in self.bios_settings_pending:
+                    new_bios_body["Attributes"][key] = val
+                    bios_settings_changed = True
+                else:
+                    new_bios_service_body["Attributes"][key] = val
+                    bios_service_settings_changed = True
+
+        if bios_settings_changed:
+            response = self.request_session.patch(
+                self.API_url + "Systems/1/bios/settings", json=new_bios_body)
+            # test = response
+
+        if bios_service_settings_changed:
+            response = self.request_session.patch(
+                self.API_url + "Systems/1/bios/service/settings", json=new_bios_service_body)
+            # test = response
+
+        return
+
 
 if __name__ == '__main__':
     ses = iLOSession("10.188.1.191", "v0163usradmin", "HP!nvent123")
-    print(type(ses.get_power_metric()))
+    # ses.change_bios_settings({"AdminName": "test"})
+    ses.reset_server(iLOSession.ILO4_RESET_OPTIONS.ON)
