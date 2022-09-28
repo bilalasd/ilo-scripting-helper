@@ -1,7 +1,9 @@
 from enum import Enum
+from opcode import hasconst
 import os
 import platform
 import re
+import sys
 import time
 import requests
 import json
@@ -10,13 +12,18 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+
+
 def get_timestamped_file_name(*args, delimeter="-", include_dot_txt=True):
     returnString = time.strftime("[%Y:%m:%d-%H:%M:%S]")
 
     if len(args) == 0:
         raise Exception("AT LEAST ONE ARGUMENT IS REQUIRED")
     elif len(args) == 1:
-        return returnString + args[0]
+        returnString = returnString + args[0]
+        if include_dot_txt:
+            returnString += ".txt"
+        return returnString
     else:
         for i in range(0, len(args) - 1):
             returnString += args[i] + delimeter
@@ -40,7 +47,6 @@ def read_in_values_from_file(file_name):
                 continue
             split = " ".join(row.split()).replace(
                 " ", "\t").strip().split("\t")
-
             values.append(split)
     return values
 
@@ -61,7 +67,31 @@ def extract_ip_from_string(unformattedString: str):
     else:
         return None
 
+def get_server_generation(ip, use_https=True):
+    """Retrieves the generation of the server
 
+    Returns:
+        Generation: iLOSession.Generation enum for the given generation.
+    """
+    ip = extract_ip_from_string(ip)
+
+    # response = self.request_session.get(
+    #     self.API_url + "systems/1/")
+    api_url = "https://" if use_https else "http://"
+    api_url += ip + "/redfish/v1/systems/1/"
+    response = requests.get(api_url, verify=False)
+    productJSON = response.json()
+    model = productJSON["Model"]
+    product = productJSON["Model"].lower()
+
+    if "gen10 plus" in product:
+        return (model, self.GENERATION.GEN10P)
+    elif "gen10" in product:
+        return (model, self.GENERATION.GEN10)
+    elif "gen9" in product:
+        return (model, self.GENERATION.GEN9)
+    else:
+        return None
 class EnvironmentInfo():
 
     class OS(Enum):
@@ -159,7 +189,10 @@ class iLOSession():
          self.ilo_firmware_version) = self._get_ilo_version()
 
     def __del__(self):
-        self.request_session.close()
+        if hasattr(self,'request_session'):
+            self.request_session.close()
+
+
     # TODO: def get_logical_drive_configuration
     # TODO: def delete_logical_drives
     # TODO: dec create_logical_drives
@@ -188,11 +221,11 @@ class iLOSession():
                                 json=credentials,  headers={'Content-Type': 'application/json'})
         if response.status_code != 201:
             if response.status_code == 400:
-                if "UnauthorizedLoginAttempt" in json.loads(response.text)["error"]["@Message.ExtendedInfo"][0]["MessageId"]:
+                if "UnauthorizedLoginAttempt" in response.text:
                     raise Exception("INVALID_CREDENTIALS")
-                elif "LoginAttemptDelayed" in json.loads(response.text)["error"]["@Message.ExtendedInfo"][0]["MessageId"]:
+                elif "LoginAttemptDelayed" in response.text:
                     raise Exception("TOO_MANY_LOGIN_ATTEMPTS")
-                elif "CreateLimitReachedForResource" in json.loads(response.text)["error"]["@Message.ExtendedInfo"][0]["MessageId"]:
+                elif "CreateLimitReachedForResource" in response.text:
                     raise Exception("TOO_MANY_OPEN_SESSIONS")
                 else:
                     raise Exception(
@@ -289,6 +322,57 @@ class iLOSession():
 
         return (bios_settings_pending, bios_service_settings_pending, combined_settings_pending, bios_settings_final, bios_service_settings_final, combined_settings_final)
 
+    def update_bios_settings(self):
+        (self._bios_settings_pending, self._bios_service_settings_pending,
+         self.bios_settings_pending, self._bios_settings_final, self._bios_service_settings_final,
+         self.bios_settings_final) = self._get_bios_settings()
+
+    def _get_bios_settings(self):
+        """Retrieves the BIOS setting for the server. Gets called automatically when the iLOSession object is created. Rarely needs to be run directly.
+
+        Returns:
+            Dict: Dictionary of all the BIOS settings on the server
+        """
+        # bios_settings = {}
+        # bios_settings_pending = {}
+        # bios_service_settings = {}
+        # bios_service_settings_pending = {}
+        # combined_settings = {}
+
+        # final settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/").json()
+        bios_settings_final = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
+
+        # final service settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/service/").json()
+        bios_service_settings_final = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
+
+        # combine the two final settings
+        combined_settings_final = merge_two_dicts(
+            bios_settings_final, bios_service_settings_final)
+
+        # pending settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/settings/").json()
+        bios_settings_pending = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
+
+        # pending service settings
+        response = self.request_session.get(
+            self.API_url + "systems/1/bios/service/settings/").json()
+        bios_service_settings_pending = response if self.generation == iLOSession.GENERATION.GEN9 else response[
+            "Attributes"]
+
+        # combine the two pending settings
+        combined_settings_pending = merge_two_dicts(
+            bios_settings_pending, bios_service_settings_pending)
+
+        return (bios_settings_pending, bios_service_settings_pending, combined_settings_pending, bios_settings_final, bios_service_settings_final, combined_settings_final)
+
     def update_server_generation(self):
         (self.model, self.generation) = self.get_server_generation()
 
@@ -314,32 +398,69 @@ class iLOSession():
         else:
             return None
 
-    def compare_bios_settings(self, values):
+    def compare_bios_settings(self, values, use_pending=True):
+        """_summary_
+
+        Args:
+            values (_type_): _description_
+
+        Raises:
+            Exception: _description_
+            Exception: _description_
+
+        Returns:
+            _type_: _description_
+        """
         if len(values) == 0:
             raise Exception("PROVIDED DICT IS EMPTY")
 
         return_obj = {}
+        any_differences = False
 
         for key in values:
             val = values[key]
+            
 
             if key not in self.bios_settings_pending and key not in self._bios_service_settings_pending:
-                raise Exception(
-                    "'" + val + "' NOT FOUND IN CURRENT BIOS SETTINGS")
+                return_obj[key]    = {
+                    "setting_current_value": None,
+                    "setting_new_value": val,
+                    "comparison": None,
+                    "found_in_bios": False
+                }
+                continue
+            current_bios_settings = self.bios_settings_pending if use_pending else self.bios_settings_final
+            current_service_bios_settings = self._bios_service_settings_pending if use_pending else self._bios_service_settings_final
+            
+            if key in current_bios_settings:
+                # value = "DIFFERENT" if val != current_bios_settings[key] else "SAME"
+                is_different = "SAME"
+                if val != current_bios_settings[key]:
+                    is_different = "DIFFERENT"
+                    any_differences = True
 
-            if key in self.bios_settings_pending:
-                if val != self.bios_settings_pending[key]:
-                    return_obj[key] = {
-                        "setting_current_value": self.bios_settings_pending[key],
-                        "setting_new_value": val
-                    }
-                else:
-                    return_obj[key] = {
+                return_obj[key]    = {
+                    "setting_current_value": current_bios_settings[key],
+                    "setting_new_value": val,
+                    "comparison": is_different,
+                    "found_in_bios": True
+                }
+            else:
+                is_different = "SAME"
+                if val != current_service_bios_settings[key]:
+                    is_different = "DIFFERENT"
+                    any_differences = True
 
-                        "setting_current_value": self._bios_service_settings_pending[key],
-                        "setting_new_value": val
-                    }
-        return return_obj
+                # value = "DIFFERENT" if val != current_service_bios_settings[key] else "SAME"
+
+                return_obj[key]    = {
+                    "setting_current_value": current_service_bios_settings[key],
+                    "setting_new_value": val,
+                    "comparison": is_different,
+                    "found_in_bios": True
+                }
+
+        return (return_obj, any_differences)
 
     def get_power_metric(self):
         if self.ilo_version in [iLOSession.ILO_VERSION.ILO_4, iLOSession.ILO_VERSION.ILO_5]:
@@ -404,8 +525,6 @@ class iLOSession():
 
         return
 
-
 if __name__ == '__main__':
-    ses = iLOSession("10.188.1.191", "v0163usradmin", "HP!nvent123")
-    # ses.change_bios_settings({"AdminName": "test"})
-    ses.reset_server(iLOSession.ILO4_RESET_OPTIONS.ON)
+    print("This file should be run directly, import it into a project.")
+    sys.exit
